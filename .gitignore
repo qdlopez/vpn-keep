@@ -1,0 +1,13 @@
+# Runtime logs
+logs/
+
+# Subscription cache
+subs/
+
+# Generated config (auto-created by script)
+config/xray.json
+config/xray.pid
+config/candidate_*.json
+
+# OS files
+.DS_Store

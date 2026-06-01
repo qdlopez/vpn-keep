@@ -1,0 +1,12 @@
+{
+  "xray_bin": "/Applications/v2rayU.app/Contents/Resources/v2ray-core/v2ray",
+  "xray_asset_dir": "/Applications/v2rayU.app/Contents/Resources/v2ray-core",
+  "socks_port": 1080,
+  "tcp_timeout_ms": 1500,
+  "max_test_nodes": 120,
+  "google_test_url": "https://www.google.com",
+  "google_test_timeout": 10,
+  "concurrent_workers": 30,
+  "protocols_priority": ["vless+vision+reality", "trojan", "vless+ws+tls", "vmess+ws", "ss"],
+  "filter_ipv6": true
+}

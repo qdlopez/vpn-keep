@@ -1,0 +1,8 @@
+[
+  { "name": "pawdroid", "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub", "encoding": "base64", "enabled": true },
+  { "name": "au1rxx", "url": "https://github.com/Au1rxx/free-vpn-subscriptions/raw/main/output/v2ray-base64.txt", "encoding": "base64", "enabled": true },
+  { "name": "xiaoji235", "url": "https://raw.githubusercontent.com/xiaoji235/airport-free/main/v2ray.txt", "encoding": "plain", "enabled": true },
+  { "name": "clashnode", "url": "https://node.clashnode.top/uploads/{YEAR}/{MONTH}/0-{TODAY}.txt", "encoding": "plain", "enabled": true },
+  { "name": "v2rayshare", "url": "https://static.v2rayshare.net/{YEAR}/{MONTH}/{TODAY}.txt", "encoding": "base64", "enabled": true },
+  { "name": "github-v2rayfree", "url": "https://gh-proxy.com/raw.githubusercontent.com/v2raynnodes/v2rayfree/refs/heads/main/v2ray.txt", "encoding": "plain", "enabled": true }
+]

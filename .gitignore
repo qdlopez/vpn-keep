@@ -1,13 +1,15 @@
-# Runtime logs
+# Runtime files
 logs/
-
-# Subscription cache
 subs/
-
-# Generated config (auto-created by script)
 config/xray.json
+config/xray_backup.json
 config/xray.pid
 config/candidate_*.json
+*.sh.bak
 
-# OS files
+# Python
+__pycache__/
+*.pyc
+
+# OS
 .DS_Store

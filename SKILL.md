@@ -1,7 +1,7 @@
 ---
 name: vpn-keeper
 description: 多源订阅抓取（clashnode/v2rayshare/GitHub），配置驱动，协议分层排序，Google HTTP 200 实测验证，启动 Xray 代理。
-version: 4.1.0
+version: 4.3.0
 ---
 
 # VPN Keeper Skill
@@ -44,6 +44,23 @@ version: 4.1.0
 
 **迁移历史**：旧目录 `~/.hermes/vpn-keeper/` 已重命名为 `~/.hermes/vpn-keeper.bak` 保留。
 ⚠️ **清理旧目录安全原则**：必须先 `find` 对比确认所有文件已迁移，**永远先 `mv` 备份再考虑删除，禁止 `rm -rf`**。
+
+## ⚠️ 修改技能后的标准流程
+
+**每次修改 vpn-keeper 后，必须提交到 GitHub 仓库 `qdlopez/vpn-keep`**：
+
+```bash
+cd ~/.hermes/skills/network/vpn-keeper
+git add -A
+git commit -m "fix: <description>"
+# 中国大陆需要走代理推送：
+git -c http.proxy=socks5://127.0.0.1:1080 -c https.proxy=socks5://127.0.0.1:1080 push origin main
+# 如果代理不可用，先运行 vpn_keeper.sh 恢复代理再推
+```
+
+## ⚠️ 路径漂移陷阱
+
+**修改 `scripts/vpn_keeper.sh` 时必须检查所有硬编码路径**。曾出现 SKILL.md 已更新为新路径 `~/.hermes/skills/network/vpn-keeper/`，但脚本内仍残留旧路径 `~/.hermes/vpn-keeper/` 的情况（包括 bash 变量和 Python heredoc 内的绝对路径）。每次改脚本后用 `grep -n '.hermes/' scripts/vpn_keeper.sh` 验证路径一致性。
 
 ## 触发条件
 - 需要访问外网（Google/Telegram）但代理失效时
@@ -113,10 +130,12 @@ sources.json   clashnode +    base64解码  server:  TCP握手           candida
 - 按延迟排序，生成前 N 个候选配置
 
 ### 5. 逐候选实测 Google（唯一验证标准）
-- **⚠️ 核心原则: TCP 能通 ≠ 能转发流量 → 唯一验证标准是 Google 返回 HTTP 200**
-- 逐个启动候选配置对应的 Xray 进程
+- **⚠️ 核心原则: TCP 握手成功 ≠ 能转发流量 → 唯一验证标准是 Google 返回 HTTP 200**
+- TCP 测速后取前 15 个候选（按协议优先级 + 延迟综合排序）
+- 逐个启动候选配置对应的 Xray 进程，先 `pgrep -f v2ray` 杀干净旧进程
 - 对每个候选执行: `curl -s --max-time 10 --socks5 127.0.0.1:1080 "https://www.google.com" -o /dev/null -w "%{http_code}"`
-- 第一个返回 200 的候选被复制为正式配置 `xray.json`
+- 第一个返回 200 的候选被保存为正式配置 `xray.json`
+- **全部失败兜底**: 用候选#0 强制重启再试一次（15s 超时）
 
 ## 诊断流程（用户报告代理不可用时）
 

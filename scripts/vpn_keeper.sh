@@ -1,20 +1,74 @@
 #!/bin/bash
-# VPN Keeper v4.3 - 自动获取订阅、优选节点、重启代理
-# 变更: 修正工作目录路径, 启动前清理旧Xray进程, 多候选Google验证(最多15个)
+# VPN Keeper v4.4 - 便携绿色版
+# 变更: 自动检测 Xray 二进制(bin/优先), 相对路径, 无需安装 v2rayU
 
-WORK_DIR="/Users/lopez/.hermes/skills/network/vpn-keeper"
+# 自动检测工作目录（脚本所在目录的上一级）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SUB_DIR="$WORK_DIR/subs"
 LOG_DIR="$WORK_DIR/logs"
-XRAY_BIN="/Applications/v2rayU.app/Contents/Resources/v2ray-core/v2ray"
-CONFIG_FILE="$WORK_DIR/config/xray.json"
-PID_FILE="$WORK_DIR/config/xray.pid"
+CONFIG_DIR="$WORK_DIR/config"
+CONFIG_FILE="$CONFIG_DIR/xray.json"
+PID_FILE="$CONFIG_DIR/xray.pid"
 
-mkdir -p "$SUB_DIR" "$LOG_DIR" "$WORK_DIR/config"
+# 自动检测 Xray 二进制：优先 bin/ 目录，其次 v2rayU，最后系统 PATH
+detect_xray() {
+    # 1. 项目自带 bin/ 目录（绿色版）
+    if [ -x "$WORK_DIR/bin/xray" ]; then
+        echo "$WORK_DIR/bin/xray"
+        return
+    fi
+    # 2. v2rayU 应用（macOS 已安装的用户）
+    if [ -x "/Applications/v2rayU.app/Contents/Resources/v2ray-core/v2ray" ]; then
+        echo "/Applications/v2rayU.app/Contents/Resources/v2ray-core/v2ray"
+        return
+    fi
+    # 3. 系统 PATH
+    local p=$(command -v xray 2>/dev/null || command -v v2ray 2>/dev/null)
+    if [ -n "$p" ]; then
+        echo "$p"
+        return
+    fi
+    echo ""
+}
+
+# 自动检测 Xray asset 目录（geoip.dat / geosite.dat 所在目录）
+detect_asset() {
+    local xray_bin="$1"
+    local bin_dir
+    bin_dir="$(dirname "$xray_bin")"
+    # 1. bin/ 目录下有 geo 文件
+    if [ -f "$bin_dir/geoip.dat" ] || [ -f "$bin_dir/geosite.dat" ]; then
+        echo "$bin_dir"
+        return
+    fi
+    # 2. v2rayU 的 v2ray-core 目录
+    local vu_dir="/Applications/v2rayU.app/Contents/Resources/v2ray-core"
+    if [ -f "$vu_dir/geoip.dat" ]; then
+        echo "$vu_dir"
+        return
+    fi
+    # 3. 回退到 bin/ 目录
+    echo "$WORK_DIR/bin"
+}
+
+XRAY_BIN="$(detect_xray)"
+XRAY_ASSET="$(detect_asset "$XRAY_BIN")"
+
+mkdir -p "$SUB_DIR" "$LOG_DIR" "$CONFIG_DIR"
 LOG="$LOG_DIR/$(date +%Y%m%d_%H%M%S).log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"; }
 
-log "=== VPN Keeper v4.3 启动 ==="
+log "=== VPN Keeper v4.4 便携版 启动 ==="
+log "工作目录: $WORK_DIR"
+log "Xray 二进制: $XRAY_BIN"
+log "Asset 目录: $XRAY_ASSET"
+
+if [ -z "$XRAY_BIN" ]; then
+    log "❌ 未找到 Xray 二进制！请运行 bin/download_bin.sh 下载，或安装 v2rayU"
+    exit 1
+fi
 
 # 关键修复：取消代理环境变量，确保直连国内网站
 unset ALL_PROXY HTTPS_PROXY HTTP_PROXY all_proxy https_proxy http_proxy
@@ -42,7 +96,12 @@ fi
 
 log "下载完成，开始解析节点..."
 
-XRAY_ASSET="/Applications/v2rayU.app/Contents/Resources/v2ray-core"
+XRAY_ASSET_FINAL="$XRAY_ASSET"
+
+# 导出环境变量供 Python 使用
+export VPN_WORK_DIR="$WORK_DIR"
+export VPN_XRAY_BIN="$XRAY_BIN"
+export VPN_XRAY_ASSET="$XRAY_ASSET_FINAL"
 
 python3 << 'PYEOF'
 import base64, json, re, socket, time, sys, os, subprocess, signal
@@ -50,11 +109,12 @@ import base64, json, re, socket, time, sys, os, subprocess, signal
 def log(msg):
     print(msg, file=sys.stderr)
 
-WORK_DIR = "/Users/lopez/.hermes/skills/network/vpn-keeper"
-CONFIG_FILE = WORK_DIR + "/config/xray.json"
-PID_FILE = WORK_DIR + "/config/xray.pid"
-XRAY_BIN = "/Applications/v2rayU.app/Contents/Resources/v2ray-core/v2ray"
-XRAY_ASSET = "/Applications/v2rayU.app/Contents/Resources/v2ray-core"
+# 从环境变量读取路径（便携版，不硬编码）
+WORK_DIR = os.environ.get('VPN_WORK_DIR', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CONFIG_FILE = os.path.join(WORK_DIR, 'config', 'xray.json')
+PID_FILE = os.path.join(WORK_DIR, 'config', 'xray.pid')
+XRAY_BIN = os.environ.get('VPN_XRAY_BIN', 'xray')
+XRAY_ASSET = os.environ.get('VPN_XRAY_ASSET', os.path.join(WORK_DIR, 'bin'))
 
 def decode_vmess(url):
     try:
@@ -143,14 +203,21 @@ def gen_config(node):
 
 def kill_all_xray():
     try:
-        r = subprocess.run(["pgrep", "-f", "v2ray"], capture_output=True, text=True)
-        for pid in r.stdout.strip().split():
+        # 匹配 xray 和 v2ray 进程
+        r = subprocess.run(["pgrep", "-f", "xray"], capture_output=True, text=True)
+        pids = set(r.stdout.strip().split())
+        r2 = subprocess.run(["pgrep", "-f", "v2ray"], capture_output=True, text=True)
+        pids.update(r2.stdout.strip().split())
+        for pid in pids:
             if pid:
                 try: os.kill(int(pid), signal.SIGTERM)
                 except: pass
         time.sleep(0.5)
-        r = subprocess.run(["pgrep", "-f", "v2ray"], capture_output=True, text=True)
-        for pid in r.stdout.strip().split():
+        r = subprocess.run(["pgrep", "-f", "xray"], capture_output=True, text=True)
+        pids = set(r.stdout.strip().split())
+        r2 = subprocess.run(["pgrep", "-f", "v2ray"], capture_output=True, text=True)
+        pids.update(r2.stdout.strip().split())
+        for pid in pids:
             if pid:
                 try: os.kill(int(pid), signal.SIGKILL)
                 except: pass
@@ -287,4 +354,4 @@ else
     log "⚠️ 最终验证失败 (HTTP $HTTP_CODE)，但Xray已启动"
 fi
 
-log "=== VPN Keeper v4.3 完成 ==="
+log "=== VPN Keeper v4.4 完成 ==="

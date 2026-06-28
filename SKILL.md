@@ -184,6 +184,9 @@ ls -lt ~/.hermes/skills/network/vpn-keeper/logs/ | head -5
 
 ## 注意事项
 
+### CDN 假通节点
+详见 `references/cdn-false-positive.md` — TCP 握手成功 ≠ 能转发流量，需多候选重试。
+
 ### 依赖
 - v2rayU 已安装在 `/Applications/v2rayU.app`
 - 必须使用 v2rayU 自带的 `geosite.dat` 和 `geoip.dat`（路径: `/Applications/v2rayU.app/Contents/Resources/v2ray-core/`）
@@ -209,9 +212,25 @@ ls -lt ~/.hermes/skills/network/vpn-keeper/logs/ | head -5
 #### CRLF 处理
 - clashnode 等源使用 CRLF 换行符，合并时不 `tr -d '\r'` 会导致节点 URL 末尾带 `\r`
 
+#### Xray 启动前健康检查
+- **必须先 `pgrep -f v2ray` 杀干净所有残留进程**，不能只用 `kill $(cat PID_FILE)`
+- 原因：旧进程可能 PID 文件丢失但进程仍在，或卡在僵尸状态占用 1080 端口
+- 正确流程：SIGTERM → sleep 0.5 → 再 pgrep 确认 → SIGKILL 残留
+- v4.3 之前脚本在此处踩过坑，导致"端口被占"或"代理转发异常"
+
+#### Python heredoc 变量展开陷阱
+- `python3 << 'PYEOF'` 中单引号阻止 bash 变量展开，`$VAR` 原样传入 Python 会报错
+- 正确做法：用 `export VARNAME="$VAR"` 在 bash 导出环境变量，Python 中用 `os.environ['VARNAME']` 读取
+- 或者把进度信息走 `sys.stderr`，只有 JSON 配置走 `stdout`（`python3 << 'PYEOF' > config.json` 时，print 全进 config 文件）
+
+#### 脚本修改原则（用户偏好）
+- **先跑通，再升级**。修改脚本前必须先用旧版本确认能跑通，再做最小改动
+- 不要一次性重写整个脚本，容易引入新 bug 且难以排查
+- 改动完成后必须实际运行测试通过，再更新 SKILL.md 和提交
+
 | 问题 | 原因 | 解决方案 |
 |------|------|----------|
-| curl 直测 Google 超时但浏览器正常 | macOS 系统 SOCKS 代理只对 GUI 应用生效 | 用 `curl --socks5 127.0.0.1:1080` 测试 |
+| 候选全部 Google 000 | 免费节点池质量差 + 只测1个候选 | **v4.3 修复**：TCP测速后取前15个候选逐个验证，首个HTTP 200即采纳。实测前6个全部HTTP 000(CDN假通)，候选#6成功 |
 | 用户收不到 cron 成功通知但代理正常 | WeChat/Weixin 消息限流 | 检查 `autofix.log` 确认实际状态 |
 | OpenClaw 插件崩溃 | 模块缓存过期 | `systemctl --user restart openclaw-gateway` |
 | 候选全部 Google 000 | 免费节点池质量差 | 增加候选数至 25+，检查 vision 节点 |

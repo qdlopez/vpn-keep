@@ -1,5 +1,20 @@
 # Changelog
 
+## v4.4.0 (2026-06-28)
+
+### 📦 便携绿色版
+- **Xray 核心内置** — 二进制文件打包到 `bin/` 目录，无需安装 v2rayU 或其他第三方软件
+- **自动检测 Xray** — 优先使用 `bin/xray`，其次检测 v2rayU，最后回退到系统 PATH
+- **自动检测 Asset** — `geoip.dat`/`geosite.dat` 跟随 Xray 二进制同目录自动加载
+- **相对路径** — 工作目录从脚本位置自动推导，不再硬编码绝对路径
+- **download_bin.sh** — GitHub clone 用户一键下载 Xray 核心 + geo 数据文件
+- **环境变量传参** — Python heredoc 通过 `VPN_WORK_DIR`/`VPN_XRAY_BIN`/`VPN_XRAY_ASSET` 接收路径
+
+### 改进
+- **kill_all_xray** — 同时匹配 `xray` 和 `v2ray` 进程（便携版使用独立 xray 二进制）
+- **中文 README** — 完整的中文文档，包含快速开始、配置说明、诊断命令
+- **.gitignore** — 排除大二进制文件（bin/xray, bin/*.dat），通过 download_bin.sh 下载
+
 ## v4.3.0 (2026-06-03)
 
 ### 问题修复

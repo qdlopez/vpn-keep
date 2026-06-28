@@ -13,3 +13,8 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# 大二进制文件（通过 bin/download_bin.sh 下载）
+bin/xray
+bin/geoip.dat
+bin/geosite.dat

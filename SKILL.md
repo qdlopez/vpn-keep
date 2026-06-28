@@ -1,7 +1,7 @@
 ---
 name: vpn-keeper
-description: 多源订阅抓取（clashnode/v2rayshare/GitHub），配置驱动，协议分层排序，Google HTTP 200 实测验证，启动 Xray 代理。
-version: 4.3.0
+description: 多源订阅抓取（clashnode/v2rayshare/GitHub），配置驱动，协议分层排序，Google HTTP 200 实测验证，启动 Xray 代理。v4.4 便携绿色版，Xray 核心内置 bin/ 目录，无需安装第三方软件。
+version: 4.4.0
 ---
 
 # VPN Keeper Skill
@@ -16,24 +16,23 @@ version: 4.3.0
 ~/.hermes/skills/network/vpn-keeper/     ← Skill 根目录（所有文件都在这里）
 ├── SKILL.md
 ├── scripts/
-│   ├── vpn_keeper.sh                    ← v4 主脚本（配置驱动）
-│   ├── validate_nodes.py                ← 独立测速工具
-│   ├── vpn_keeper.sh.bak                ← 旧版备份
-│   ├── vpn_keeper_v2.py                 ← v3 Python 版
-│   ├── gen_config.py                    ← 旧配置生成器
-│   └── gen_config2.py                   ← 旧配置生成器 v2
+│   ├── vpn_keeper.sh                    ← v4.4 主脚本（便携版，自动检测 Xray）
+│   ├── stop_vpn.sh                      ← ⭐ 停止脚本（关闭 Xray + 系统代理）
+│   └── validate_nodes.py                ← 独立测速工具
+├── bin/                                 ← ⭐ v4.4 便携绿色版核心
+│   ├── xray                             ← Xray 二进制（32MB, .gitignore 排除）
+│   ├── geoip.dat                        ← IP 地理数据库（20MB, .gitignore 排除）
+│   ├── geosite.dat                      ← 域名分类数据库（10MB, .gitignore 排除）
+│   └── download_bin.sh                  ← GitHub clone 用户一键下载核心文件
 ├── config/
 │   ├── sources.json                     ← ⭐ 订阅源配置（新增源改这里）
 │   ├── settings.json                    ← ⭐ 全局参数（改阈值改这里）
 │   ├── xray.json                        ← Xray 配置（自动生成）
-│   ├── xray_backup.json                 ← 稳定备份配置
 │   ├── xray.pid                         ← Xray 进程 PID
 │   └── candidate_N.json                 ← 测速中间产物
 ├── subs/                                ← 订阅缓存
 │   ├── all_nodes.txt                    ← 合并去重后
 │   └── source_*.txt                     ← 各源原始文件
-├── knowledge/
-│   └── node_sources.md                  ← 节点源元数据
 ├── logs/
 │   ├── autofix.log                      ← 10 分钟检测日志
 │   └── YYYYMMDD_HHMMSS.log              ← 每次运行日志
@@ -58,9 +57,50 @@ git -c http.proxy=socks5://127.0.0.1:1080 -c https.proxy=socks5://127.0.0.1:1080
 # 如果代理不可用，先运行 vpn_keeper.sh 恢复代理再推
 ```
 
+**⚠️ 推送循环依赖陷阱**：`stop_vpn.sh` 会关闭代理，如果在此之后需要 `git push` 到 GitHub 会失败。推送前确保护理仍在运行，或先重新运行 `vpn_keeper.sh` 恢复代理。
+
+## v4.4 便携绿色版架构
+
+**核心设计：Xray 二进制内置在 `bin/` 目录，无需安装 v2rayU 或任何第三方软件。**
+
+```
+bin/
+├── xray                ← Xray-core 二进制（32MB, .gitignore 排除）
+├── geoip.dat           ← IP 地理数据库（20MB, .gitignore 排除）
+├── geosite.dat         ← 域名分类数据库（10MB, .gitignore 排除）
+└── download_bin.sh     ← GitHub clone 用户一键下载核心文件
+```
+
+**Xray 自动检测优先级**：
+1. `bin/xray`（项目自带，绿色版优先）
+2. `/Applications/v2rayU.app/.../v2ray`（macOS v2rayU 用户）
+3. 系统 PATH 中的 `xray` 或 `v2ray`
+
+**Asset 目录自动检测**：跟随 Xray 二进制所在目录，加载同目录下的 `geoip.dat`/`geosite.dat`。
+
+**Python heredoc 环境变量传参**（解决单引号 heredoc 无法展开 bash 变量的问题）：
+```bash
+export VPN_WORK_DIR="$WORK_DIR"
+export VPN_XRAY_BIN="$XRAY_BIN"
+export VPN_XRAY_ASSET="$XRAY_ASSET"
+python3 << 'PYEOF'
+import os
+WORK_DIR = os.environ.get('VPN_WORK_DIR')
+XRAY_BIN = os.environ.get('VPN_XRAY_BIN')
+# ...
+PYEOF
+```
+
+**stop_vpn.sh 停止脚本**：彻底关闭 VPN Keeper
+1. 通过 PID 文件精确关闭 Xray 进程
+2. `pgrep -f xray` + `pgrep -f v2ray` 兜底扫描残留进程（SIGTERM → SIGKILL）
+3. 关闭 macOS 系统 SOCKS 代理（`networksetup -setsocksfirewallproxystate Wi-Fi off`）
+
 ## ⚠️ 路径漂移陷阱
 
-**修改 `scripts/vpn_keeper.sh` 时必须检查所有硬编码路径**。曾出现 SKILL.md 已更新为新路径 `~/.hermes/skills/network/vpn-keeper/`，但脚本内仍残留旧路径 `~/.hermes/vpn-keeper/` 的情况（包括 bash 变量和 Python heredoc 内的绝对路径）。每次改脚本后用 `grep -n '.hermes/' scripts/vpn_keeper.sh` 验证路径一致性。
+**v4.4 已修复**：脚本使用 `SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"` 自动推导工作目录，不再硬编码绝对路径。Python heredoc 通过环境变量 `VPN_WORK_DIR`/`VPN_XRAY_BIN`/`VPN_XRAY_ASSET` 接收路径。
+
+**历史教训**：v4.2 曾出现 SKILL.md 已更新为新路径，但脚本内 Python heredoc 仍残留旧硬编码路径的情况。每次改脚本后用 `grep -n '/Users/' scripts/vpn_keeper.sh` 验证无硬编码路径残留。
 
 ## 触发条件
 - 需要访问外网（Google/Telegram）但代理失效时
@@ -163,8 +203,14 @@ tail -5 ~/.hermes/skills/network/vpn-keeper/logs/autofix.log
 ## 关键命令
 
 ```bash
-# 手动运行完整流程
+# 手动运行完整流程（便携版，自动检测 bin/xray）
 bash ~/.hermes/skills/network/vpn-keeper/scripts/vpn_keeper.sh
+```bash
+# 手动运行完整流程（启动代理）
+bash ~/.hermes/skills/network/vpn-keeper/scripts/vpn_keeper.sh
+
+# 停止代理：关闭 Xray 进程 + 关闭系统 SOCKS 代理
+bash ~/.hermes/skills/network/vpn-keeper/scripts/stop_vpn.sh
 
 # 快速检测 Google（每10分钟cron）
 bash ~/.hermes/scripts/vpn-autofix.sh
@@ -180,6 +226,9 @@ cat ~/.hermes/skills/network/vpn-keeper/config/xray.pid | xargs ps -p
 
 # 查看最新日志
 ls -lt ~/.hermes/skills/network/vpn-keeper/logs/ | head -5
+
+# GitHub clone 用户下载 Xray 核心
+bash bin/download_bin.sh
 ```
 
 ## 注意事项
@@ -188,8 +237,10 @@ ls -lt ~/.hermes/skills/network/vpn-keeper/logs/ | head -5
 详见 `references/cdn-false-positive.md` — TCP 握手成功 ≠ 能转发流量，需多候选重试。
 
 ### 依赖
-- v2rayU 已安装在 `/Applications/v2rayU.app`
-- 必须使用 v2rayU 自带的 `geosite.dat` 和 `geoip.dat`（路径: `/Applications/v2rayU.app/Contents/Resources/v2ray-core/`）
+- **v4.4 便携版**：Xray 二进制内置在 `bin/` 目录，无需安装任何第三方软件
+- 如果 `bin/xray` 不存在，运行 `bash bin/download_bin.sh` 一键下载
+- 脚本自动检测 Xray：`bin/xray`（优先）→ v2rayU → 系统 PATH
+- 如果使用 v2rayU：必须使用其自带的 `geosite.dat` 和 `geoip.dat`（路径: `/Applications/v2rayU.app/Contents/Resources/v2ray-core/`）
 
 ### 故障排除
 
@@ -213,7 +264,8 @@ ls -lt ~/.hermes/skills/network/vpn-keeper/logs/ | head -5
 - clashnode 等源使用 CRLF 换行符，合并时不 `tr -d '\r'` 会导致节点 URL 末尾带 `\r`
 
 #### Xray 启动前健康检查
-- **必须先 `pgrep -f v2ray` 杀干净所有残留进程**，不能只用 `kill $(cat PID_FILE)`
+- **必须先 `pgrep -f xray` + `pgrep -f v2ray` 杀干净所有残留进程**，不能只用 `kill $(cat PID_FILE)`
+- v4.4 起 `kill_all_xray()` 同时匹配 `xray` 和 `v2ray` 进程（便携版使用独立 xray 二进制，进程名是 `xray` 而非 `v2ray`）
 - 原因：旧进程可能 PID 文件丢失但进程仍在，或卡在僵尸状态占用 1080 端口
 - 正确流程：SIGTERM → sleep 0.5 → 再 pgrep 确认 → SIGKILL 残留
 - v4.3 之前脚本在此处踩过坑，导致"端口被占"或"代理转发异常"
@@ -234,6 +286,8 @@ ls -lt ~/.hermes/skills/network/vpn-keeper/logs/ | head -5
 | 用户收不到 cron 成功通知但代理正常 | WeChat/Weixin 消息限流 | 检查 `autofix.log` 确认实际状态 |
 | OpenClaw 插件崩溃 | 模块缓存过期 | `systemctl --user restart openclaw-gateway` |
 | 候选全部 Google 000 | 免费节点池质量差 | 增加候选数至 25+，检查 vision 节点 |
+| git push 失败连不上 GitHub | stop_vpn.sh 关闭了代理 | 先运行 `vpn_keeper.sh` 恢复代理再推送 |
+| `bin/xray` 不存在 | 未运行 download_bin.sh | `bash bin/download_bin.sh` 下载 Xray 核心 |
 
 ## 已验证数据源
 详见 `references/verified-sources.md`

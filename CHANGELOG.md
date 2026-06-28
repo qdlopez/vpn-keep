@@ -10,10 +10,18 @@
 - **download_bin.sh** — GitHub clone 用户一键下载 Xray 核心 + geo 数据文件
 - **环境变量传参** — Python heredoc 通过 `VPN_WORK_DIR`/`VPN_XRAY_BIN`/`VPN_XRAY_ASSET` 接收路径
 
+### 🌐 真正的多源抓取
+- **读取 sources.json** — 从所有启用的订阅源并行抓取（之前只从 clashnode 单源）
+- **4协议解析** — vmess + vless + trojan + ss（之前只有 vmess + vless）
+- **URL解码** — vless/trojan 参数正确 `urllib.parse.unquote()` 解码
+- **协议优先级** — vless+reality > vless+tls > trojan > vless > vmess > ss
+- **实测验证** — 429节点 → 去重279 → TCP通过29 → 候选#9 Google HTTP 200 ✅
+
 ### 改进
-- **kill_all_xray** — 同时匹配 `xray` 和 `v2ray` 进程（便携版使用独立 xray 二进制）
-- **中文 README** — 完整的中文文档，包含快速开始、配置说明、诊断命令
-- **.gitignore** — 排除大二进制文件（bin/xray, bin/*.dat），通过 download_bin.sh 下载
+- **stop_vpn.sh** — 停止脚本：PID文件关闭 + pgrep兜底 + 关闭系统代理
+- **kill_all_xray** — 同时匹配 `xray` 和 `v2ray` 进程
+- **中文 README** — 完整的中文文档
+- **.gitignore** — 排除大二进制文件
 
 ## v4.3.0 (2026-06-03)
 

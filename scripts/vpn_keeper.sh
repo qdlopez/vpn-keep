@@ -73,28 +73,8 @@ fi
 # 关键修复：取消代理环境变量，确保直连国内网站
 unset ALL_PROXY HTTPS_PROXY HTTP_PROXY all_proxy https_proxy http_proxy
 
-# 尝试今天的订阅
-TODAY=$(date +%Y%m%d)
-YEAR=$(date +%Y)
-MONTH=$(date +%m)
-V2RAY_URL="https://node.clashnode.top/uploads/${YEAR}/${MONTH}/0-${TODAY}.txt"
-
-log "订阅: $V2RAY_URL"
-curl -sL --connect-timeout 10 "$V2RAY_URL" -o "$SUB_DIR/latest.txt" 2>/dev/null
-
-if [ ! -s "$SUB_DIR/latest.txt" ]; then
-    YESTERDAY=$(date -v-1d +%Y%m%d)
-    V2RAY_URL="https://node.clashnode.top/uploads/${YEAR}/${MONTH}/0-${YESTERDAY}.txt"
-    log "订阅: $V2RAY_URL (昨天)"
-    curl -sL --connect-timeout 10 "$V2RAY_URL" -o "$SUB_DIR/latest.txt" 2>/dev/null
-fi
-
-if [ ! -s "$SUB_DIR/latest.txt" ]; then
-    log "❌ 订阅下载失败，使用上次配置"
-    exit 0
-fi
-
-log "下载完成，开始解析节点..."
+# 多源抓取：读取 sources.json 从所有启用的源下载
+log "开始多源订阅抓取..."
 
 XRAY_ASSET_FINAL="$XRAY_ASSET"
 
@@ -102,6 +82,105 @@ XRAY_ASSET_FINAL="$XRAY_ASSET"
 export VPN_WORK_DIR="$WORK_DIR"
 export VPN_XRAY_BIN="$XRAY_BIN"
 export VPN_XRAY_ASSET="$XRAY_ASSET_FINAL"
+
+# 多源抓取：读取 sources.json，从所有启用的源下载订阅
+python3 << 'PYSRC'
+import json, os, subprocess, sys, datetime
+
+WORK_DIR = os.environ['VPN_WORK_DIR']
+sources_file = os.path.join(WORK_DIR, 'config', 'sources.json')
+sub_dir = os.path.join(WORK_DIR, 'subs')
+os.makedirs(sub_dir, exist_ok=True)
+
+# 日期变量
+now = datetime.datetime.now()
+yesterday = now - datetime.timedelta(days=1)
+date_vars = {
+    '{YEAR}': now.strftime('%Y'),
+    '{MONTH}': now.strftime('%m'),
+    '{TODAY}': now.strftime('%Y%m%d'),
+    '{YESTERDAY}': yesterday.strftime('%Y%m%d'),
+}
+
+# 读取订阅源配置
+try:
+    with open(sources_file) as f:
+        sources = json.load(f)
+except Exception as e:
+    print(f"❌ 读取 sources.json 失败: {e}", file=sys.stderr)
+    sys.exit(1)
+
+all_raw_path = os.path.join(sub_dir, 'all_raw.txt')
+all_nodes = []
+
+for src in sources:
+    if not src.get('enabled', True):
+        continue
+    name = src['name']
+    url = src['url']
+    encoding = src.get('encoding', 'plain')
+
+    # URL 变量替换
+    for var, val in date_vars.items():
+        url = url.replace(var, val)
+
+    print(f"  抓取 {name}: {url}", file=sys.stderr)
+
+    # 下载
+    src_file = os.path.join(sub_dir, f'source_{name}.txt')
+    try:
+        r = subprocess.run(['curl', '-sL', '--connect-timeout', '10', url],
+                          capture_output=True, timeout=20)
+        content = r.stdout.decode('utf-8', errors='ignore').strip()
+    except Exception as e:
+        print(f"    ❌ 下载失败: {e}", file=sys.stderr)
+        continue
+
+    if not content:
+        print(f"    ❌ 空内容", file=sys.stderr)
+        continue
+
+    # 编码处理
+    if encoding == 'base64':
+        import base64
+        try:
+            # 清理 base64 内容
+            clean = content.replace('\n', '').replace('\r', '').replace(' ', '')
+            padding = 4 - len(clean) % 4
+            if padding != 4:
+                clean += '=' * padding
+            content = base64.b64decode(clean).decode('utf-8', errors='ignore').strip()
+        except Exception as e:
+            print(f"    ⚠️ base64 解码失败，尝试当 plain 处理: {e}", file=sys.stderr)
+
+    # 保存原始文件
+    with open(src_file, 'w') as f:
+        f.write(content)
+
+    # 统计节点数
+    lines = [l.strip().rstrip('\r') for l in content.split('\n') if l.strip().rstrip('\r')]
+    node_lines = [l for l in lines if l.startswith(('vmess://', 'vless://', 'trojan://', 'ss://'))]
+    all_nodes.extend(node_lines)
+    print(f"    ✅ {len(node_lines)} 个节点", file=sys.stderr)
+
+# 合并保存
+with open(all_raw_path, 'w') as f:
+    f.write('\n'.join(all_nodes))
+
+# 同时写入 latest.txt（兼容后续 Python 解析流程）
+latest_path = os.path.join(sub_dir, 'latest.txt')
+with open(latest_path, 'w') as f:
+    f.write('\n'.join(all_nodes))
+
+print(f"合并完成: {len(all_nodes)} 个原始节点 → {latest_path}", file=sys.stderr)
+PYSRC
+
+if [ ! -s "$SUB_DIR/latest.txt" ]; then
+    log "❌ 所有订阅源下载失败，使用上次配置"
+    exit 0
+fi
+
+log "多源抓取完成，开始解析节点..."
 
 python3 << 'PYEOF'
 import base64, json, re, socket, time, sys, os, subprocess, signal
@@ -125,6 +204,7 @@ def decode_vmess(url):
     except: return None
 
 def parse_links(filepath):
+    import urllib.parse
     nodes = []
     with open(filepath) as f:
         for line in f:
@@ -142,8 +222,37 @@ def parse_links(filepath):
                         for q in qstr.split('&'):
                             if '=' in q:
                                 k, v = q.split('=', 1)
-                                params[k] = v
+                                params[k] = urllib.parse.unquote(v)
                     nodes.append({'proto': 'vless', 'server': m.group(2), 'port': m.group(3), 'raw': line, 'name': line.split('#')[-1] if '#' in line else 'vless', 'params': params})
+            elif line.startswith('trojan://'):
+                m = re.match(r'trojan://([^@]+)@([^:]+):(\d+)', line.split('#')[0])
+                if m:
+                    params = {}
+                    if '?' in line.split('#')[0]:
+                        qstr = line.split('#')[0].split('?', 1)[1]
+                        for q in qstr.split('&'):
+                            if '=' in q:
+                                k, v = q.split('=', 1)
+                                params[k] = urllib.parse.unquote(v)
+                    nodes.append({'proto': 'trojan', 'server': m.group(2), 'port': m.group(3), 'raw': line, 'name': line.split('#')[-1] if '#' in line else 'trojan', 'params': params, 'password': urllib.parse.unquote(m.group(1))})
+            elif line.startswith('ss://'):
+                # ss://method:password@server:port 或 ss://base64@server:port
+                m = re.match(r'ss://([^@]+)@([^:]+):(\d+)', line.split('#')[0])
+                if m:
+                    import base64 as b64mod
+                    userinfo = m.group(1)
+                    # 尝试 base64 解码 method:password
+                    try:
+                        if '@' not in userinfo and '%' not in userinfo:
+                            pad = 4 - len(userinfo) % 4
+                            if pad != 4: userinfo += '=' * pad
+                            decoded = b64mod.b64decode(userinfo).decode('utf-8', errors='ignore')
+                            method, password = decoded.split(':', 1)
+                        else:
+                            method, password = urllib.parse.unquote(userinfo).split(':', 1)
+                    except:
+                        method, password = 'aes-256-gcm', 'password'
+                    nodes.append({'proto': 'ss', 'server': m.group(2), 'port': m.group(3), 'raw': line, 'name': line.split('#')[-1] if '#' in line else 'ss', 'method': method, 'password': password})
     return nodes
 
 def tcp_test(server, port, timeout=2):
@@ -188,6 +297,22 @@ def gen_config(node):
                 if params.get('host'):
                     stream['wsSettings']['headers'] = {"Host": params.get('host','')}
             proxy_ob['streamSettings'] = stream
+
+    elif node['proto'] == 'trojan':
+        proxy_ob['settings'] = {"servers": [{"address": node['server'], "port": int(node['port']), "password": node.get('password', '')}]}
+        stream = {"network": "tcp", "security": "tls"}
+        params = node.get('params', {})
+        sni = params.get('sni', node['server'])
+        stream['tlsSettings'] = {"serverName": sni, "allowInsecure": True}
+        if params.get('type') == 'ws':
+            stream['network'] = 'ws'
+            stream['wsSettings'] = {"path": params.get('path', '/')}
+            if params.get('host'):
+                stream['wsSettings']['headers'] = {"Host": params.get('host', '')}
+        proxy_ob['streamSettings'] = stream
+
+    elif node['proto'] == 'ss':
+        proxy_ob['settings'] = {"servers": [{"address": node['server'], "port": int(node['port']), "method": node.get('method', 'aes-256-gcm'), "password": node.get('password', '')}]}
 
     config = {
         "log": {"loglevel": "warning"},
@@ -277,14 +402,16 @@ for n in nodes:
 
 log(f"解析 {len(nodes)} 个节点, 去重后 {len(unique)} 个")
 
-# 协议优先级: vless > vmess (vless Reality 节点优先)
+# 协议优先级: vless+reality > vless+tls > trojan > vless > vmess > ss
 def proto_score(n):
     if n['proto'] == 'vless':
         p = n.get('params', {})
         if p.get('security') == 'reality': return 0
         if p.get('security') == 'tls': return 1
-        return 2
-    return 3
+        return 3
+    if n['proto'] == 'trojan': return 2
+    if n['proto'] == 'vmess': return 4
+    return 5  # ss
 
 unique.sort(key=proto_score)
 
